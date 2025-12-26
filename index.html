@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic Christmas - Final Clean</title>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000000;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+
+        /* UI Center */
+        #ui-layer {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        /* Guide text */
+        .guide {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 13px;
+            margin-bottom: 20px;
+            text-shadow: 0 2px 4px black;
+        }
+
+        button {
+            pointer-events: auto;
+            cursor: pointer;
+            background: linear-gradient(to bottom, #D32F2F, #8B0000);
+            color: #FFF;
+            border: 2px solid #FFD700;
+            padding: 15px 50px;
+            border-radius: 30px;
+            font-weight: 800;
+            font-size: 16px;
+            box-shadow: 0 0 30px rgba(255, 0, 0, 0.6);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.05);
+            }
+
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        /* Camera Preview - Responsive */
+        #camera-preview {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 100px;
+            height: 75px;
+            border: 2px solid rgba(255, 0, 0, 0.5);
+            transform: scaleX(-1);
+            opacity: 0.6;
+            border-radius: 8px;
+            z-index: 100;
+        }
+
+        /* Tablet và Desktop */
+        @media (min-width: 768px) {
+            #camera-preview {
+                width: 160px;
+                height: 120px;
+                top: 15px;
+                right: 15px;
+            }
+        }
+
+        /* Desktop lớn */
+        @media (min-width: 1200px) {
+            #camera-preview {
+                width: 200px;
+                height: 150px;
+            }
+        }
+
+        #copyright {
+            position: absolute;
+            bottom: 10px;
+            right: 15px;
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 12px;
+            z-index: 100;
+            font-family: sans-serif;
+            pointer-events: none;
+            font-style: italic;
+        }
+
+        #error-log {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            color: red;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 999;
+            padding: 10px;
+        }
+
+        /* Drawing mode indicator */
+        #draw-mode-indicator {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            color: #FF69B4;
+            font-size: 16px;
+            font-weight: bold;
+            text-shadow: 0 0 10px currentColor, 0 0 20px currentColor;
+            opacity: 0;
+            transition: opacity 0.3s, color 0.3s;
+            z-index: 100;
+        }
+
+        #draw-mode-indicator.active {
+            opacity: 1;
+            animation: glow 1.5s ease-in-out infinite alternate;
+        }
+
+        @keyframes glow {
+            from {
+                text-shadow: 0 0 10px currentColor, 0 0 20px currentColor;
+            }
+
+            to {
+                text-shadow: 0 0 20px currentColor, 0 0 40px currentColor, 0 0 60px currentColor;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="error-log"></div>
+
+    <!-- UI -->
+    <div id="ui-layer">
+        <div class="guide" id="guide-text">
+            🖐 <b>Open:</b> Nổ &nbsp;|&nbsp; 🫶 <b>Heart:</b> Tym &nbsp;|&nbsp; ✊ <b>Fist:</b> Cây &nbsp;|&nbsp;
+            👈👉 <b>Swipe:</b> quay cây &nbsp;|&nbsp; 👌 <b>Pinch:</b> Xem ảnh<br>
+            ☝️ <b>Chỉ lên:</b> Vẽ cầu vồng &nbsp;|&nbsp; 👇 <b>Chỉ xuống:</b> Quả cầu tuyết ❄️
+        </div>
+        <button id="btnStart" onclick="startSystem()">START MAGIC</button>
+    </div>
+
+    <div id="draw-mode-indicator">✨ DRAWING MODE ✨</div>
+    <div id="copyright">© by Huy</div>
+
+    <div id="canvas-container"></div>
+    <video class="input_video" style="display:none"></video>
+    <canvas id="camera-preview" width="120" height="90"></canvas>
+
+    <script>
+        // ==========================================
+        // 1. RESOURCES CONFIG
+        // ==========================================
+        const MUSIC_URL = "./audio.mp3";
+        let bgMusic = new Audio(MUSIC_URL);
+        bgMusic.loop = true; bgMusic.volume = 1.0;
+
+        const loader = new THREE.TextureLoader();
+        const photoFiles = ['./image1.jpeg', './image2.jpeg', './image3.jpeg', './image4.jpeg', './image5.jpeg', './image6.jpeg', './image7.jpeg', './image8.jpeg'];
+        const photoTextures = [];
+        photoFiles.forEach((f, i) => photoTextures[i] = loader.load(f));
+
+        function createCustomTexture(type) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            const cx = 64, cy = 64;
+
+            if (type === 'gold_glow') {
+                const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 40);
+                grd.addColorStop(0, '#FFFFFF');
+                grd.addColorStop(0.2, '#FFFFE0');
+                grd.addColorStop(0.5, '#FFD700');
+                grd.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = grd; ctx.fillRect(0, 0, 128, 128);
+
+            } else if (type === 'red_light') {
+                const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 50);
+                grd.addColorStop(0, '#FFAAAA');
+                grd.addColorStop(0.3, '#FF0000');
+                grd.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = grd; ctx.fillRect(0, 0, 128, 128);
+
+            } else if (type === 'gift_red') {
+                ctx.fillStyle = '#D32F2F'; ctx.fillRect(20, 20, 88, 88);
+                ctx.fillStyle = '#FFD700'; ctx.fillRect(54, 20, 20, 88); ctx.fillRect(20, 54, 88, 20);
+                ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.lineWidth = 2; ctx.strokeRect(20, 20, 88, 88);
+
+            } else if (type === 'trail_glow') {
+                const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 50);
+                grd.addColorStop(0, '#FFFFFF');
+                grd.addColorStop(0.2, '#FF69B4');
+                grd.addColorStop(0.5, '#FF1493');
+                grd.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = grd; ctx.fillRect(0, 0, 128, 128);
+            }
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        const textures = {
+            gold: createCustomTexture('gold_glow'),
+            red: createCustomTexture('red_light'),
+            gift: createCustomTexture('gift_red'),
+            trail: createCustomTexture('trail_glow')
+        };
+
+        // ==========================================
+        // 2. SYSTEM CONFIG
+        // ==========================================
+        const CONFIG = {
+            goldCount: 2500,  // Tăng số lượng particle
+            redCount: 400,
+            giftCount: 200,
+            explodeRadius: 65,
+            photoOrbitRadius: 25,
+            treeHeight: 70,
+            treeBaseRadius: 35,
+            snowGlobeRadius: 45,  // Tăng bán kính quả cầu lớn hơn
+            snowGlobeBaseWidth: 35, // Tăng chiều rộng đế
+            snowGlobeBaseHeight: 22 // Tăng chiều cao đế
+        };
+
+        let scene, camera, renderer;
+        let groupGold, groupRed, groupGift;
+        let photoMeshes = [];
+        let titleMesh, starMesh, loveMesh;
+
+        let state = 'TREE';
+        let selectedIndex = 0;
+        let handX = 0.5;
+        let handY = 0.5;
+
+        // Biến cho chuyển động và xoay
+        let autoRotateSpeed = 0.003;
+        const CENTER_THRESHOLD = 0.15;
+        let explodeOffsetY = 0;
+
+        // ==========================================
+        // DRAWING MODE - Vẽ với ngón tay
+        // ==========================================
+        let isPointing = false;
+        let isPointingDown = false; // Chỉ tay xuống
+        let fingerX3D = 0, fingerY3D = 0;
+        let trailParticles = null;
+        const MAX_TRAIL_POINTS = 800; // Tăng số điểm vẽ
+        const TRAIL_FADE_SPEED = 0.005; // Fade chậm hơn
+
+        // Bảng màu Snow Globe
+        const SNOW_GLOBE_COLORS = [
+            { r: 0.4, g: 0.8, b: 1.0 },   // Cyan sáng
+            { r: 0.6, g: 0.4, b: 1.0 },   // Tím
+            { r: 1.0, g: 0.84, b: 0.0 },  // Vàng gold
+            { r: 1.0, g: 1.0, b: 1.0 },   // Trắng
+            { r: 0.0, g: 0.5, b: 1.0 },   // Xanh dương
+            { r: 1.0, g: 0.4, b: 0.7 },   // Hồng
+            { r: 0.3, g: 1.0, b: 0.8 },   // Ngọc lam
+            { r: 1.0, g: 0.6, b: 0.2 },   // Cam vàng
+        ];
+        let snowGlobeColorIndex = 0;
+
+        // ==========================================
+        // 3. THREE.JS SYSTEM
+        // ==========================================
+        // Tính toán camera position dựa vào màn hình
+        function getCameraZ() {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            const aspect = w / h;
+
+            // Mobile portrait
+            if (w < 768) {
+                return aspect < 1 ? 140 : 120; // Portrait thì xa hơn
+            }
+            // Tablet
+            if (w < 1200) {
+                return 110;
+            }
+            // Desktop
+            return 100;
+        }
+
+        function getFOV() {
+            const w = window.innerWidth;
+            // Mobile cần FOV rộng hơn để nhìn toàn bộ
+            if (w < 768) {
+                return 70;
+            }
+            if (w < 1200) {
+                return 65;
+            }
+            return 60;
+        }
+
+        function init3D() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.002);
+
+            camera = new THREE.PerspectiveCamera(getFOV(), window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = getCameraZ();
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            groupGold = createParticleSystem('gold', CONFIG.goldCount, 2.0);
+            groupRed = createParticleSystem('red', CONFIG.redCount, 3.5);
+            groupGift = createParticleSystem('gift', CONFIG.giftCount, 3.0);
+
+            createPhotos();
+            createDecorations();
+            createTrailSystem();
+            animate();
+        }
+
+        function createParticleSystem(type, count, size) {
+            const pPositions = [];
+            const pExplodeTargets = [];
+            const pTreeTargets = [];
+            const pHeartTargets = [];
+            const pSnowGlobeTargets = []; // Mảng mới cho Snow Globe
+            const sizes = [];
+            const phases = [];
+
+            for (let i = 0; i < count; i++) {
+                const h = Math.random() * CONFIG.treeHeight;
+                const y = h - CONFIG.treeHeight / 2;
+                let radiusRatio = (type === 'gold') ? Math.sqrt(Math.random()) : 0.9 + Math.random() * 0.1;
+                const maxR = (1 - (h / CONFIG.treeHeight)) * CONFIG.treeBaseRadius;
+                const r = maxR * radiusRatio;
+                const theta = Math.random() * Math.PI * 2;
+                pTreeTargets.push(r * Math.cos(theta), y, r * Math.sin(theta));
+
+                const u = Math.random();
+                const v = Math.random();
+                const phi = Math.acos(2 * v - 1);
+                const lam = 2 * Math.PI * u;
+                let radMult = (type === 'gift') ? 1.2 : 1.0;
+                const rad = CONFIG.explodeRadius * Math.cbrt(Math.random()) * radMult;
+                pExplodeTargets.push(rad * Math.sin(phi) * Math.cos(lam), rad * Math.sin(phi) * Math.sin(lam), rad * Math.cos(phi));
+
+                const tHeart = Math.random() * Math.PI * 2;
+                let hx = 16 * Math.pow(Math.sin(tHeart), 3);
+                let hy = 13 * Math.cos(tHeart) - 5 * Math.cos(2 * tHeart) - 2 * Math.cos(3 * tHeart) - Math.cos(4 * tHeart);
+                const rFill = Math.pow(Math.random(), 0.3);
+                hx *= rFill; hy *= rFill;
+                let hz = (Math.random() - 0.5) * 8 * rFill;
+                const noise = 1.0;
+                hx += (Math.random() - 0.5) * noise;
+                hy += (Math.random() - 0.5) * noise;
+                hz += (Math.random() - 0.5) * noise;
+                const scaleH = 2.2;
+                pHeartTargets.push(hx * scaleH, hy * scaleH + 5, hz);
+
+                // Tạo hình quả cầu tuyết PERFECT - RÕ RÀNG & ĐẸP
+                let sgx, sgy, sgz;
+                const partType = Math.random();
+
+                if (partType < 0.22) {
+                    // VIỀN CẦU THỦY TINH - dày và rõ ràng
+                    const shellTheta = Math.random() * Math.PI * 2;
+                    const shellPhi = Math.random() * Math.PI * 0.52;
+                    const shellR = CONFIG.snowGlobeRadius * (0.94 + Math.random() * 0.08);
+                    sgx = shellR * Math.sin(shellPhi) * Math.cos(shellTheta);
+                    sgy = shellR * Math.cos(shellPhi) + 10;
+                    sgz = shellR * Math.sin(shellPhi) * Math.sin(shellTheta);
+                } else if (partType < 0.26) {
+                    // NGÔI SAO 5 CÁNH - vàng rực rỡ trên đỉnh
+                    const starAngle = Math.random() * Math.PI * 2;
+                    const starR = Math.random() * 5;
+                    const starHeight = Math.random() * 6;
+                    sgx = starR * Math.cos(starAngle) * (1 - starHeight / 10);
+                    sgy = 26 + starHeight;
+                    sgz = starR * Math.sin(starAngle) * (1 - starHeight / 10);
+                } else if (partType < 0.32) {
+                    // THÂN CÂY - trụ nâu đậm
+                    const trunkR = Math.random() * 3;
+                    const trunkA = Math.random() * Math.PI * 2;
+                    const trunkH = Math.random() * 8;
+                    sgx = trunkR * Math.cos(trunkA);
+                    sgy = -5 + trunkH;
+                    sgz = trunkR * Math.sin(trunkA);
+                } else if (partType < 0.48) {
+                    // TÁN CÂY THÔNG - nhiều tầng rõ ràng
+                    const th = Math.random() * 28;
+                    const ty = th;
+                    const layerIdx = Math.floor(th / 6);
+                    const layerOffset = (th % 6) / 6;
+                    const baseR = (1 - th / 30) * 16;
+                    const waveR = baseR * (1 + Math.sin(layerIdx * Math.PI) * 0.15);
+                    const tr = waveR * Math.pow(Math.random(), 0.4);
+                    const ta = Math.random() * Math.PI * 2;
+                    sgx = tr * Math.cos(ta);
+                    sgy = ty;
+                    sgz = tr * Math.sin(ta);
+                } else if (partType < 0.56) {
+                    // TUYẾT RƠI - trắng bay lượn
+                    const snowR = Math.random() * CONFIG.snowGlobeRadius * 0.7;
+                    const snowTheta = Math.random() * Math.PI * 2;
+                    const snowY = Math.random() * 38 - 3;
+                    sgx = snowR * Math.cos(snowTheta) * (1 - Math.abs(snowY) / 55);
+                    sgy = snowY;
+                    sgz = snowR * Math.sin(snowTheta) * (1 - Math.abs(snowY) / 55);
+                } else if (partType < 0.62) {
+                    // NHÀ THỜ CHI TIẾT - bên trái
+                    const churchPart = Math.random();
+                    if (churchPart < 0.35) {
+                        // THÁP CHUÔNG CAO - hình tam giác nhọn
+                        const spireH = Math.random();
+                        const spireW = (1 - spireH) * 3;
+                        sgx = -22 + (Math.random() - 0.5) * spireW;
+                        sgy = 8 + spireH * 14;
+                        sgz = (Math.random() - 0.5) * spireW;
+                    } else if (churchPart < 0.55) {
+                        // THÂN NHÀ THỜ - hình chữ nhật
+                        sgx = -22 + (Math.random() - 0.5) * 8;
+                        sgy = Math.random() * 10 - 3;
+                        sgz = (Math.random() - 0.5) * 6;
+                    } else if (churchPart < 0.70) {
+                        // CỬa LỚN - vòng cung
+                        const doorA = Math.random() * Math.PI;
+                        sgx = -22;
+                        sgy = 2 + Math.sin(doorA) * 4;
+                        sgz = 4 + Math.cos(doorA) * 2;
+                    } else {
+                        // MÁI NHÀ THỜ - hình tam giác
+                        const roofH = Math.random();
+                        const roofW = (1 - roofH) * 5;
+                        sgx = -22 + (Math.random() - 0.5) * roofW;
+                        sgy = 6 + roofH * 5;
+                        sgz = (Math.random() - 0.5) * roofW;
+                    }
+                } else if (partType < 0.68) {
+                    // NGÔI NHÀ CHI TIẾT - bên phải
+                    const housePart = Math.random();
+                    if (housePart < 0.30) {
+                        // MÁI NHÀ TAM GIÁC - đỏ
+                        const roofH = Math.random();
+                        const roofW = (1 - roofH) * 6;
+                        sgx = 22 + (Math.random() - 0.5) * roofW;
+                        sgy = 5 + roofH * 7;
+                        sgz = (Math.random() - 0.5) * roofW;
+                    } else if (housePart < 0.65) {
+                        // TƯỜNG NHÀ - hình chữ nhật
+                        sgx = 22 + (Math.random() - 0.5) * 8;
+                        sgy = Math.random() * 7 - 3;
+                        sgz = (Math.random() - 0.5) * 8;
+                    } else if (housePart < 0.80) {
+                        // CỬa SỔ - 2 ô vuông
+                        const winSide = Math.random() > 0.5 ? 1 : -1;
+                        sgx = 22 + winSide * 2;
+                        sgy = 1 + Math.random() * 3;
+                        sgz = (Math.random() - 0.5) * 2;
+                    } else {
+                        // CỬa CHÍNH - hình chữ nhật
+                        sgx = 22;
+                        sgy = -2 + Math.random() * 4;
+                        sgz = 5 + (Math.random() - 0.5) * 2;
+                    }
+                } else if (partType < 0.71) {
+                    // ỐNG KHÓI - trên mái nhà
+                    sgx = 24 + (Math.random() - 0.5) * 2;
+                    sgy = 10 + Math.random() * 4;
+                    sgz = (Math.random() - 0.5) * 2;
+                } else if (partType < 0.74) {
+                    // CỬa SỔ SÁNG - ánh sáng vàng ấm
+                    const side = Math.random() > 0.5 ? 1 : -1;
+                    sgx = side * 22;
+                    sgy = 1 + Math.random() * 3;
+                    sgz = (Math.random() - 0.5) * 2;
+                } else if (partType < 0.78) {
+                    // MẶT TUYẾT - nền trắng rộng
+                    const groundR = Math.random() * CONFIG.snowGlobeRadius * 0.95;
+                    const groundA = Math.random() * Math.PI * 2;
+                    sgx = groundR * Math.cos(groundA);
+                    sgy = -7 - Math.random() * 3;
+                    sgz = groundR * Math.sin(groundA);
+                } else if (partType < 0.84) {
+                    // VIỀN ĐẾ TRÊN - vàng sáng bóng
+                    const rimA = Math.random() * Math.PI * 2;
+                    const rimR = CONFIG.snowGlobeBaseWidth * (0.88 + Math.random() * 0.15);
+                    sgx = rimR * Math.cos(rimA);
+                    sgy = -12 - Math.random() * 3;
+                    sgz = rimR * Math.sin(rimA);
+                } else if (partType < 0.92) {
+                    // THÂN ĐỞ + HOA VĂN - vàng gold trang trí
+                    const bodyA = Math.random() * Math.PI * 2;
+                    const bodyH = Math.random();
+                    const bodyR = CONFIG.snowGlobeBaseWidth * (0.55 + bodyH * 0.4);
+                    const pattern = Math.sin(bodyA * 4) * 0.1;
+                    sgx = (bodyR + pattern * 5) * Math.cos(bodyA);
+                    sgy = -16 - bodyH * 12;
+                    sgz = (bodyR + pattern * 5) * Math.sin(bodyA);
+                } else {
+                    // CHÂN ĐỞ - phần dưới cùng
+                    const footA = Math.random() * Math.PI * 2;
+                    const footH = Math.random();
+                    const footR = CONFIG.snowGlobeBaseWidth * (0.25 + footH * 0.45);
+                    sgx = footR * Math.cos(footA);
+                    sgy = -30 - Math.random() * 10;
+                    sgz = footR * Math.sin(footA);
+                }
+                sgx += (Math.random() - 0.5) * 0.6;
+                sgy += (Math.random() - 0.5) * 0.6;
+                sgz += (Math.random() - 0.5) * 0.6;
+                pSnowGlobeTargets.push(sgx, sgy, sgz);
+
+                pPositions.push(pTreeTargets[i * 3], pTreeTargets[i * 3 + 1], pTreeTargets[i * 3 + 2]);
+                sizes.push(size);
+                phases.push(Math.random() * Math.PI * 2);
+            }
+
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pPositions, 3));
+            geo.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+
+            const colors = new Float32Array(count * 3);
+            const baseColor = new THREE.Color();
+            if (type === 'gold') baseColor.setHex(0xFFD700);
+            else if (type === 'red') baseColor.setHex(0xFF0000);
+            else baseColor.setHex(0xFFFFFF);
+
+            for (let i = 0; i < count; i++) {
+                colors[i * 3] = baseColor.r;
+                colors[i * 3 + 1] = baseColor.g;
+                colors[i * 3 + 2] = baseColor.b;
+            }
+            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            geo.userData = {
+                tree: pTreeTargets, explode: pExplodeTargets, heart: pHeartTargets, snowglobe: pSnowGlobeTargets,
+                phases: phases, baseColor: baseColor, baseSize: size
+            };
+
+            const mat = new THREE.PointsMaterial({
+                size: size,
+                map: textures[type],
+                transparent: true, opacity: 1.0,
+                vertexColors: true,
+                blending: (type === 'gift') ? THREE.NormalBlending : THREE.AdditiveBlending,
+                depthWrite: false,
+                sizeAttenuation: true
+            });
+
+            const points = new THREE.Points(geo, mat);
+            scene.add(points);
+            return points;
+        }
+
+        function createTrailSystem() {
+            const trailGeo = new THREE.BufferGeometry();
+            const positions = new Float32Array(MAX_TRAIL_POINTS * 3);
+            const colors = new Float32Array(MAX_TRAIL_POINTS * 3);
+            const sizes = new Float32Array(MAX_TRAIL_POINTS);
+            const alphas = new Float32Array(MAX_TRAIL_POINTS);
+
+            for (let i = 0; i < MAX_TRAIL_POINTS; i++) {
+                positions[i * 3] = 0;
+                positions[i * 3 + 1] = 0;
+                positions[i * 3 + 2] = 0;
+                colors[i * 3] = 1;
+                colors[i * 3 + 1] = 0.41;
+                colors[i * 3 + 2] = 0.71;
+                sizes[i] = 0;
+                alphas[i] = 0;
+            }
+
+            trailGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            trailGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            trailGeo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+            trailGeo.userData = { alphas: alphas };
+
+            const trailMat = new THREE.PointsMaterial({
+                size: 4,
+                map: textures.trail,
+                transparent: true,
+                opacity: 1.0,
+                vertexColors: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                sizeAttenuation: true
+            });
+
+            trailParticles = new THREE.Points(trailGeo, trailMat);
+            scene.add(trailParticles);
+        }
+
+        function addTrailPoint(x, y, z, isSnowGlobe = false) {
+            if (!trailParticles) return;
+
+            const positions = trailParticles.geometry.attributes.position.array;
+            const sizes = trailParticles.geometry.attributes.size.array;
+            const colors = trailParticles.geometry.attributes.color.array;
+            const alphas = trailParticles.geometry.userData.alphas;
+
+            // Di chuyển tất cả điểm cũ lên 1 vị trí
+            for (let i = MAX_TRAIL_POINTS - 1; i > 0; i--) {
+                positions[i * 3] = positions[(i - 1) * 3];
+                positions[i * 3 + 1] = positions[(i - 1) * 3 + 1];
+                positions[i * 3 + 2] = positions[(i - 1) * 3 + 2];
+                sizes[i] = sizes[i - 1];
+                alphas[i] = alphas[i - 1];
+                colors[i * 3] = colors[(i - 1) * 3];
+                colors[i * 3 + 1] = colors[(i - 1) * 3 + 1];
+                colors[i * 3 + 2] = colors[(i - 1) * 3 + 2];
+            }
+
+            if (isSnowGlobe) {
+                // Hiệu ứng Snow Globe - thêm nhiều hạt với vị trí ngẫu nhiên xung quanh
+                const spread = 8; // Độ lan tỏa
+                positions[0] = x + (Math.random() - 0.5) * spread;
+                positions[1] = y + (Math.random() - 0.5) * spread;
+                positions[2] = z + (Math.random() - 0.5) * spread * 0.5;
+
+                // Kích thước ngẫu nhiên cho hiệu ứng lấp lánh
+                sizes[0] = 3 + Math.random() * 6;
+                alphas[0] = 0.8 + Math.random() * 0.2;
+
+                // Chọn màu từ bảng màu Snow Globe
+                const colorChoice = SNOW_GLOBE_COLORS[Math.floor(Math.random() * SNOW_GLOBE_COLORS.length)];
+                // Thêm chút biến đổi màu
+                const variation = 0.15;
+                colors[0] = Math.min(1, colorChoice.r + (Math.random() - 0.5) * variation);
+                colors[1] = Math.min(1, colorChoice.g + (Math.random() - 0.5) * variation);
+                colors[2] = Math.min(1, colorChoice.b + (Math.random() - 0.5) * variation);
+            } else {
+                // Hiệu ứng vẽ thường (cầu vồng)
+                positions[0] = x;
+                positions[1] = y;
+                positions[2] = z;
+                sizes[0] = 5;
+                alphas[0] = 1.0;
+
+                const time = Date.now() * 0.002;
+                const hue = (time % 1);
+                const color = new THREE.Color().setHSL(hue, 1.0, 0.6);
+                colors[0] = color.r;
+                colors[1] = color.g;
+                colors[2] = color.b;
+            }
+
+            trailParticles.geometry.attributes.position.needsUpdate = true;
+            trailParticles.geometry.attributes.size.needsUpdate = true;
+            trailParticles.geometry.attributes.color.needsUpdate = true;
+        }
+
+        // Thêm nhiều hạt cùng lúc cho hiệu ứng Snow Globe
+        function addSnowGlobeParticles(x, y, z, count = 5) {
+            for (let i = 0; i < count; i++) {
+                addTrailPoint(x, y, z, true);
+            }
+        }
+
+        function updateTrail() {
+            if (!trailParticles) return;
+
+            const sizes = trailParticles.geometry.attributes.size.array;
+            const colors = trailParticles.geometry.attributes.color.array;
+            const alphas = trailParticles.geometry.userData.alphas;
+
+            for (let i = 0; i < MAX_TRAIL_POINTS; i++) {
+                alphas[i] -= TRAIL_FADE_SPEED;
+                if (alphas[i] < 0) alphas[i] = 0;
+                sizes[i] = 5 * alphas[i];
+                colors[i * 3] *= 0.995;
+                colors[i * 3 + 1] *= 0.995;
+                colors[i * 3 + 2] *= 0.995;
+            }
+
+            trailParticles.geometry.attributes.size.needsUpdate = true;
+            trailParticles.geometry.attributes.color.needsUpdate = true;
+        }
+
+        function createPhotos() {
+            const geo = new THREE.PlaneGeometry(8, 8);
+            const borderGeo = new THREE.PlaneGeometry(9, 9);
+            const borderMat = new THREE.MeshBasicMaterial({ color: 0xFFD700 });
+
+            for (let i = 0; i < 8; i++) {
+                const mat = new THREE.MeshBasicMaterial({ map: photoTextures[i], side: THREE.DoubleSide });
+                const mesh = new THREE.Mesh(geo, mat);
+                const border = new THREE.Mesh(borderGeo, borderMat);
+                border.position.z = -0.1;
+                mesh.add(border);
+                mesh.visible = false; mesh.scale.set(0, 0, 0);
+                scene.add(mesh);
+                photoMeshes.push(mesh);
+            }
+        }
+
+        function createDecorations() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.font = 'bold italic 90px "Times New Roman"';
+            ctx.fillStyle = '#FFD700'; ctx.textAlign = 'center';
+            ctx.shadowColor = "#FF0000"; ctx.shadowBlur = 40;
+            ctx.fillText("MERRY CHRISTMAS", 512, 130);
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending });
+            titleMesh = new THREE.Mesh(new THREE.PlaneGeometry(60, 15), mat);
+            titleMesh.position.set(0, 50, 0);
+            scene.add(titleMesh);
+
+            const starCanvas = document.createElement('canvas');
+            starCanvas.width = 128; starCanvas.height = 128;
+            const sCtx = starCanvas.getContext('2d');
+            sCtx.fillStyle = "#FFFF00"; sCtx.shadowColor = "#FFF"; sCtx.shadowBlur = 20;
+            sCtx.beginPath();
+            const cx = 64, cy = 64, outer = 50, inner = 20;
+            for (let i = 0; i < 5; i++) {
+                sCtx.lineTo(cx + Math.cos((18 + i * 72) / 180 * Math.PI) * outer, cy - Math.sin((18 + i * 72) / 180 * Math.PI) * outer);
+                sCtx.lineTo(cx + Math.cos((54 + i * 72) / 180 * Math.PI) * inner, cy - Math.sin((54 + i * 72) / 180 * Math.PI) * inner);
+            }
+            sCtx.closePath(); sCtx.fill();
+            const starTex = new THREE.CanvasTexture(starCanvas);
+            const starMat = new THREE.MeshBasicMaterial({ map: starTex, transparent: true, blending: THREE.AdditiveBlending });
+            starMesh = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), starMat);
+            starMesh.position.set(0, CONFIG.treeHeight / 2 + 2, 0);
+            scene.add(starMesh);
+
+            const loveCanvas = document.createElement('canvas');
+            loveCanvas.width = 1024; loveCanvas.height = 256;
+            const lCtx = loveCanvas.getContext('2d');
+            lCtx.font = 'bold 120px "Segoe UI", sans-serif';
+            lCtx.fillStyle = '#FF69B4'; lCtx.textAlign = 'center';
+            lCtx.shadowColor = "#FF1493"; lCtx.shadowBlur = 40;
+            lCtx.fillText("I LOVE YOU ❤️", 512, 130);
+            const loveTex = new THREE.CanvasTexture(loveCanvas);
+            const loveMat = new THREE.MeshBasicMaterial({ map: loveTex, transparent: true, blending: THREE.AdditiveBlending });
+            loveMesh = new THREE.Mesh(new THREE.PlaneGeometry(70, 18), loveMat);
+            loveMesh.position.set(0, 0, 20);
+            loveMesh.visible = false;
+            scene.add(loveMesh);
+        }
+
+        function updateParticleGroup(group, type, targetState, speed, handRotY, time) {
+            const positions = group.geometry.attributes.position.array;
+            const sizes = group.geometry.attributes.size.array;
+            const colors = group.geometry.attributes.color.array;
+            const phases = group.geometry.userData.phases;
+            const baseColor = group.geometry.userData.baseColor;
+            const baseSize = group.geometry.userData.baseSize;
+
+            let targetKey = (targetState === 'TREE') ? 'tree' :
+                (targetState === 'HEART') ? 'heart' :
+                    (targetState === 'SNOWGLOBE') ? 'snowglobe' : 'explode';
+            let targets = group.geometry.userData[(targetState === 'PHOTO') ? 'explode' : targetKey];
+
+            if (targetState === 'DRAW') {
+                const count = positions.length / 3;
+                const attractSpeed = 0.15;
+
+                for (let i = 0; i < count; i++) {
+                    const dist = Math.sqrt(
+                        Math.pow(positions[i * 3] - fingerX3D, 2) +
+                        Math.pow(positions[i * 3 + 1] - fingerY3D, 2) +
+                        Math.pow(positions[i * 3 + 2], 2)
+                    );
+
+                    const attractRange = 80;
+                    if (dist < attractRange) {
+                        const factor = 1 - (dist / attractRange);
+                        const pullStrength = factor * attractSpeed;
+
+                        positions[i * 3] += (fingerX3D - positions[i * 3]) * pullStrength;
+                        positions[i * 3 + 1] += (fingerY3D - positions[i * 3 + 1]) * pullStrength;
+                        positions[i * 3 + 2] += (0 - positions[i * 3 + 2]) * pullStrength * 0.5;
+
+                        const brightness = 1.0 + factor * 1.5;
+                        colors[i * 3] = Math.min(1, baseColor.r * brightness);
+                        colors[i * 3 + 1] = Math.min(1, baseColor.g * brightness);
+                        colors[i * 3 + 2] = Math.min(1, baseColor.b * brightness);
+                        sizes[i] = baseSize * (1 + factor * 2);
+                    } else {
+                        const treeTargets = group.geometry.userData.tree;
+                        positions[i * 3] += (treeTargets[i * 3] - positions[i * 3]) * 0.02;
+                        positions[i * 3 + 1] += (treeTargets[i * 3 + 1] - positions[i * 3 + 1]) * 0.02;
+                        positions[i * 3 + 2] += (treeTargets[i * 3 + 2] - positions[i * 3 + 2]) * 0.02;
+
+                        colors[i * 3] = baseColor.r;
+                        colors[i * 3 + 1] = baseColor.g;
+                        colors[i * 3 + 2] = baseColor.b;
+                        sizes[i] = baseSize;
+                    }
+                }
+
+                group.rotation.y = 0;
+                group.position.y = 0;
+                group.scale.set(1, 1, 1);
+                group.geometry.attributes.position.needsUpdate = true;
+                group.geometry.attributes.color.needsUpdate = true;
+                group.geometry.attributes.size.needsUpdate = true;
+                return;
+            }
+
+            for (let i = 0; i < positions.length; i++) {
+                positions[i] += (targets[i] - positions[i]) * speed;
+            }
+            group.geometry.attributes.position.needsUpdate = true;
+
+            const count = positions.length / 3;
+
+            if (targetState === 'TREE') {
+                group.rotation.y += autoRotateSpeed;
+                const floatY = Math.sin(time * 0.8) * 2;
+                group.position.y = floatY;
+
+                for (let i = 0; i < count; i++) {
+                    sizes[i] = baseSize;
+                    let brightness = 1.0;
+                    if (type === 'red') {
+                        brightness = 0.5 + 0.5 * Math.sin(time * 3 + phases[i]);
+                    } else if (type === 'gold') {
+                        brightness = 0.8 + 0.4 * Math.sin(time * 10 + phases[i]);
+                    }
+                    colors[i * 3] = baseColor.r * brightness;
+                    colors[i * 3 + 1] = baseColor.g * brightness;
+                    colors[i * 3 + 2] = baseColor.b * brightness;
+                }
+                group.geometry.attributes.color.needsUpdate = true;
+                group.geometry.attributes.size.needsUpdate = true;
+
+            } else if (targetState === 'HEART') {
+                group.rotation.y = 0;
+                group.position.y = 0;
+                const beatScale = 1 + Math.abs(Math.sin(time * 3)) * 0.15;
+                group.scale.set(beatScale, beatScale, beatScale);
+
+                for (let i = 0; i < count; i++) {
+                    colors[i * 3] = baseColor.r; colors[i * 3 + 1] = baseColor.g; colors[i * 3 + 2] = baseColor.b;
+                    if (i % 3 === 0) sizes[i] = baseSize;
+                    else sizes[i] = 0;
+                }
+                group.geometry.attributes.color.needsUpdate = true;
+                group.geometry.attributes.size.needsUpdate = true;
+
+            } else if (targetState === 'SNOWGLOBE') {
+                // State Snow Globe - quả cầu tuyết giống trong hình
+                group.rotation.y += 0.004;
+                group.position.y = Math.sin(time * 0.3) * 1.5;
+                const snowScale = 1.0 + Math.sin(time * 1.5) * 0.015;
+                group.scale.set(snowScale, snowScale, snowScale);
+
+                const targets = group.geometry.userData.snowglobe;
+
+                for (let i = 0; i < count; i++) {
+                    const py = targets ? targets[i * 3 + 1] : 0;
+                    const px = targets ? targets[i * 3] : 0;
+                    const sparkle = 0.5 + 0.5 * Math.sin(time * 4 + phases[i] * 2.5);
+                    const twinkle = 0.6 + 0.4 * Math.sin(time * 10 + phases[i] * 6);
+                    const glow = 0.7 + 0.3 * Math.sin(time * 8 + phases[i] * 4);
+
+                    if (py > 20) {
+                        // NGÔI SAO 5 CÁNH - vàng rực nhấp nháy
+                        colors[i * 3] = 1.0;
+                        colors[i * 3 + 1] = 0.85 + twinkle * 0.15;
+                        colors[i * 3 + 2] = 0.1 + twinkle * 0.3;
+                        sizes[i] = baseSize * (2.0 + twinkle * 1.5);
+                    } else if (py > 35) {
+                        // VIỀN CẦU THỦY TINH - cyan/trắng lung linh
+                        colors[i * 3] = 0.6 + glow * 0.4;
+                        colors[i * 3 + 1] = 0.9 + glow * 0.1;
+                        colors[i * 3 + 2] = 1.0;
+                        sizes[i] = baseSize * (0.5 + glow * 0.4);
+                    } else if (py > 15) {
+                        // TUYẾT RƠI - trắng tinh lấp lánh như kim cương
+                        colors[i * 3] = 0.93 + twinkle * 0.07;
+                        colors[i * 3 + 1] = 0.96 + twinkle * 0.04;
+                        colors[i * 3 + 2] = 1.0;
+                        sizes[i] = baseSize * (0.25 + twinkle * 1.2);
+                    } else if (py > 2 && Math.abs(px) < 4 && py < 6) {
+                        // THÂN CÂY - nâu đậm
+                        colors[i * 3] = 0.35 + sparkle * 0.1;
+                        colors[i * 3 + 1] = 0.2 + sparkle * 0.05;
+                        colors[i * 3 + 2] = 0.1;
+                        sizes[i] = baseSize * (0.9 + sparkle * 0.2);
+                    } else if (py > -8) {
+                        // CÂY THÔNG + NHÀ THỜ + NGÔI NHÀ
+                        if (px < -18) {
+                            // NHÀ THỜ - chi tiết
+                            if (py > 12) {
+                                // THÁP CHUÔNG - xám đậm nhọn
+                                colors[i * 3] = 0.35 + glow * 0.08;
+                                colors[i * 3 + 1] = 0.35 + glow * 0.08;
+                                colors[i * 3 + 2] = 0.4 + glow * 0.1;
+                                sizes[i] = baseSize * (0.9 + glow * 0.35);
+                            } else if (py > 6) {
+                                // MÁI NHÀ THỜ - xám đen
+                                colors[i * 3] = 0.28 + sparkle * 0.07;
+                                colors[i * 3 + 1] = 0.28 + sparkle * 0.07;
+                                colors[i * 3 + 2] = 0.32 + sparkle * 0.08;
+                                sizes[i] = baseSize * (0.85 + sparkle * 0.25);
+                            } else if (phases[i] > 5.65) {
+                                // CỬa sổ nhà thờ - vàng sáng ấm
+                                colors[i * 3] = 1.0;
+                                colors[i * 3 + 1] = 0.78 + glow * 0.18;
+                                colors[i * 3 + 2] = 0.12;
+                                sizes[i] = baseSize * (1.15 + glow * 0.75);
+                            } else {
+                                // Tường nhà thờ - đá xám
+                                colors[i * 3] = 0.5 + sparkle * 0.05;
+                                colors[i * 3 + 1] = 0.45 + sparkle * 0.05;
+                                colors[i * 3 + 2] = 0.42;
+                                sizes[i] = baseSize * 0.88;
+                            }
+                        } else if (px > 18) {
+                            // NGÔI NHÀ - chi tiết
+                            if (py > 9) {
+                                // ỐNG KHÓI - xám đỏ
+                                colors[i * 3] = 0.45 + glow * 0.1;
+                                colors[i * 3 + 1] = 0.35 + glow * 0.05;
+                                colors[i * 3 + 2] = 0.32;
+                                sizes[i] = baseSize * (0.8 + glow * 0.25);
+                            } else if (py > 5) {
+                                // MÁI NHÀ - đỏ gạch
+                                colors[i * 3] = 0.72 + sparkle * 0.12;
+                                colors[i * 3 + 1] = 0.22 + sparkle * 0.05;
+                                colors[i * 3 + 2] = 0.12;
+                                sizes[i] = baseSize * (0.92 + sparkle * 0.32);
+                            } else if (phases[i] > 5.4) {
+                                // CỬa sổ sáng - vàng ấm
+                                colors[i * 3] = 1.0;
+                                colors[i * 3 + 1] = 0.88 + glow * 0.1;
+                                colors[i * 3 + 2] = 0.22;
+                                sizes[i] = baseSize * (1.0 + glow * 0.6);
+                            } else {
+                                // Tường nhà - be kem sáng
+                                colors[i * 3] = 0.92;
+                                colors[i * 3 + 1] = 0.85;
+                                colors[i * 3 + 2] = 0.7;
+                                sizes[i] = baseSize * 0.87;
+                            }
+                        } else if (Math.abs(px) > 28) {
+                            // NỀN TUYẾT XA - trắng mờ
+                            colors[i * 3] = 0.88 + sparkle * 0.08;
+                            colors[i * 3 + 1] = 0.9 + sparkle * 0.06;
+                            colors[i * 3 + 2] = 0.95 + sparkle * 0.05;
+                            sizes[i] = baseSize * (0.55 + sparkle * 0.22);
+                        } else {
+                            // CÂY THÔNG với đèn NHIỀU MÀU
+                            if (phases[i] > 5.9) {
+                                // Đèn ĐỎ
+                                colors[i * 3] = 1.0;
+                                colors[i * 3 + 1] = twinkle * 0.12;
+                                colors[i * 3 + 2] = 0.08;
+                                sizes[i] = baseSize * (0.95 + twinkle * 1.0);
+                            } else if (phases[i] > 5.7) {
+                                // Đèn VÀNG GOLD
+                                colors[i * 3] = 1.0;
+                                colors[i * 3 + 1] = 0.92 + twinkle * 0.08;
+                                colors[i * 3 + 2] = 0.05;
+                                sizes[i] = baseSize * (0.85 + twinkle * 0.9);
+                            } else if (phases[i] > 5.5) {
+                                // Đèn XANH DƯƠNG
+                                colors[i * 3] = 0.15;
+                                colors[i * 3 + 1] = 0.55 + twinkle * 0.35;
+                                colors[i * 3 + 2] = 1.0;
+                                sizes[i] = baseSize * (0.75 + twinkle * 0.8);
+                            } else if (phases[i] > 5.3) {
+                                // Đèn HỒNG
+                                colors[i * 3] = 1.0;
+                                colors[i * 3 + 1] = 0.35 + twinkle * 0.25;
+                                colors[i * 3 + 2] = 0.75 + twinkle * 0.18;
+                                sizes[i] = baseSize * (0.7 + twinkle * 0.7);
+                            } else if (phases[i] > 5.1) {
+                                // Đèn XANH LÁ
+                                colors[i * 3] = 0.1;
+                                colors[i * 3 + 1] = 1.0;
+                                colors[i * 3 + 2] = 0.3 + twinkle * 0.2;
+                                sizes[i] = baseSize * (0.7 + twinkle * 0.65);
+                            } else if (phases[i] > 4.9) {
+                                // Đèn TÍM
+                                colors[i * 3] = 0.7 + twinkle * 0.2;
+                                colors[i * 3 + 1] = 0.2;
+                                colors[i * 3 + 2] = 1.0;
+                                sizes[i] = baseSize * (0.65 + twinkle * 0.6);
+                            } else {
+                                // LÁ CÂY xanh đậm
+                                colors[i * 3] = 0.01 + sparkle * 0.06;
+                                colors[i * 3 + 1] = 0.22 + sparkle * 0.2;
+                                colors[i * 3 + 2] = 0.06;
+                                sizes[i] = baseSize * (0.88 + sparkle * 0.32);
+                            }
+                        }
+                    } else if (py > -13) {
+                        // MẶT TUYẾT - trắng tinh khiết
+                        colors[i * 3] = 0.9 + sparkle * 0.1;
+                        colors[i * 3 + 1] = 0.94 + sparkle * 0.06;
+                        colors[i * 3 + 2] = 1.0;
+                        sizes[i] = baseSize * (0.75 + sparkle * 0.2);
+                    } else if (py > -18) {
+                        // VIỀN ĐẾ TRÊN - vàng sáng bóng loáng
+                        colors[i * 3] = 1.0;
+                        colors[i * 3 + 1] = 0.8 + glow * 0.1;
+                        colors[i * 3 + 2] = 0.1 * glow;
+                        sizes[i] = baseSize * (1.15 + glow * 0.35);
+                    } else {
+                        // THÂN ĐỞ + HOA VĂN - vàng gold + họa tiết
+                        const pattern = Math.sin(phases[i] * 12) * 0.5 + 0.5;
+                        const isPattern = pattern > 0.7;
+                        if (isPattern) {
+                            // Hoa văn nổi - vàng sáng
+                            colors[i * 3] = 1.0;
+                            colors[i * 3 + 1] = 0.85 + sparkle * 0.1;
+                            colors[i * 3 + 2] = 0.2;
+                            sizes[i] = baseSize * (1.1 + sparkle * 0.3);
+                        } else {
+                            // Nền đế - vàng đậm
+                            colors[i * 3] = 0.85 + pattern * 0.1;
+                            colors[i * 3 + 1] = 0.6 + pattern * 0.15 + sparkle * 0.08;
+                            colors[i * 3 + 2] = 0.03 + pattern * 0.08;
+                            sizes[i] = baseSize * (0.9 + pattern * 0.25 + sparkle * 0.15);
+                        }
+                    }
+                }
+                group.geometry.attributes.color.needsUpdate = true;
+                group.geometry.attributes.size.needsUpdate = true;
+
+            } else {
+                group.scale.set(1, 1, 1);
+                group.rotation.y += (handRotY - group.rotation.y) * 0.1;
+
+                const targetY = (0.5 - handY) * 60;
+                explodeOffsetY += (targetY - explodeOffsetY) * 0.08;
+                group.position.y = explodeOffsetY;
+
+                for (let i = 0; i < count; i++) {
+                    sizes[i] = baseSize;
+                    let brightness = 1.0;
+                    if (type === 'gold' || type === 'red') {
+                        brightness = 0.8 + 0.5 * Math.sin(time * 12 + phases[i]);
+                    }
+                    colors[i * 3] = baseColor.r * brightness;
+                    colors[i * 3 + 1] = baseColor.g * brightness;
+                    colors[i * 3 + 2] = baseColor.b * brightness;
+                }
+                group.geometry.attributes.size.needsUpdate = true;
+                group.geometry.attributes.color.needsUpdate = true;
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = Date.now() * 0.001;
+            const speed = 0.08;
+            const handRotY = (handX - 0.5) * 4.0;
+
+            updateParticleGroup(groupGold, 'gold', state, speed, handRotY, time);
+            updateParticleGroup(groupRed, 'red', state, speed, handRotY, time);
+            updateParticleGroup(groupGift, 'gift', state, speed, handRotY, time);
+
+            updateTrail();
+
+            // Vẽ khi chỉ tay
+            if (state === 'DRAW' && isPointing) {
+                if (isPointingDown) {
+                    // Chỉ xuống: Hiệu ứng Snow Globe
+                    addSnowGlobeParticles(fingerX3D, fingerY3D, 10, 3);
+                } else {
+                    // Chỉ lên: Vẽ cầu vồng bình thường
+                    addTrailPoint(fingerX3D, fingerY3D, 10, false);
+                }
+            }
+
+            photoMeshes.forEach((mesh, i) => {
+                if (!mesh.material.map && photoTextures[i]) {
+                    mesh.material.map = photoTextures[i]; mesh.material.needsUpdate = true;
+                }
+            });
+
+            if (state === 'TREE') {
+                titleMesh.visible = true; starMesh.visible = true; loveMesh.visible = false;
+                const floatY = Math.sin(time * 0.8) * 2;
+                titleMesh.position.y = 50 + floatY;
+                starMesh.position.y = CONFIG.treeHeight / 2 + 2 + floatY;
+                titleMesh.scale.lerp(new THREE.Vector3(1, 1, 1), 0.1);
+                starMesh.rotation.z -= 0.02;
+                starMesh.material.opacity = 0.7 + 0.3 * Math.sin(time * 5);
+                photoMeshes.forEach(m => { m.scale.lerp(new THREE.Vector3(0, 0, 0), 0.1); m.visible = false; });
+
+            } else if (state === 'HEART') {
+                titleMesh.visible = false; starMesh.visible = false; loveMesh.visible = true;
+                photoMeshes.forEach(m => { m.visible = false; });
+                const s = 1 + Math.abs(Math.sin(time * 3)) * 0.1;
+                loveMesh.scale.set(s, s, 1);
+
+            } else if (state === 'DRAW') {
+                titleMesh.visible = false; starMesh.visible = false; loveMesh.visible = false;
+                photoMeshes.forEach(m => { m.visible = false; });
+
+            } else if (state === 'SNOWGLOBE') {
+                // Hiển thị quả cầu tuyết
+                titleMesh.visible = false; starMesh.visible = false; loveMesh.visible = false;
+                photoMeshes.forEach(m => { m.visible = false; });
+
+            } else if (state === 'EXPLODE') {
+                titleMesh.visible = false; starMesh.visible = false; loveMesh.visible = false;
+                const baseAngle = groupGold.rotation.y;
+                const angleStep = (Math.PI * 2) / 8;
+                let bestIdx = 0; let maxZ = -999;
+                photoMeshes.forEach((mesh, i) => {
+                    mesh.visible = true;
+                    const angle = baseAngle + i * angleStep;
+                    const x = Math.sin(angle) * CONFIG.photoOrbitRadius;
+                    const z = Math.cos(angle) * CONFIG.photoOrbitRadius;
+                    const y = Math.sin(time + i) * 3 + explodeOffsetY;
+                    mesh.position.lerp(new THREE.Vector3(x, y, z), 0.1);
+                    mesh.lookAt(camera.position);
+                    if (z > maxZ) { maxZ = z; bestIdx = i; }
+                    if (z > 5) {
+                        const ds = 1.0 + (z / CONFIG.photoOrbitRadius) * 0.8;
+                        mesh.scale.lerp(new THREE.Vector3(ds, ds, ds), 0.1);
+                    } else {
+                        mesh.scale.lerp(new THREE.Vector3(0.6, 0.6, 0.6), 0.1);
+                    }
+                });
+                selectedIndex = bestIdx;
+
+            } else if (state === 'PHOTO') {
+                loveMesh.visible = false;
+                photoMeshes.forEach((mesh, i) => {
+                    if (i === selectedIndex) {
+                        mesh.position.lerp(new THREE.Vector3(0, 0, 60), 0.1);
+                        mesh.scale.lerp(new THREE.Vector3(5, 5, 5), 0.1);
+                        mesh.lookAt(camera.position); mesh.rotation.z = 0;
+                    } else {
+                        mesh.scale.lerp(new THREE.Vector3(0, 0, 0), 0.1);
+                    }
+                });
+            }
+            renderer.render(scene, camera);
+        }
+
+        function isPointingGesture(landmarks) {
+            const indexTip = landmarks[8];
+            const indexMcp = landmarks[5];
+            const middleTip = landmarks[12];
+            const middleMcp = landmarks[9];
+            const ringTip = landmarks[16];
+            const ringMcp = landmarks[13];
+            const pinkyTip = landmarks[20];
+            const pinkyMcp = landmarks[17];
+
+            const indexExtended = indexTip.y < indexMcp.y - 0.05;
+            const middleCurled = middleTip.y > middleMcp.y - 0.03;
+            const ringCurled = ringTip.y > ringMcp.y - 0.03;
+            const pinkyCurled = pinkyTip.y > pinkyMcp.y - 0.03;
+
+            return indexExtended && middleCurled && ringCurled && pinkyCurled;
+        }
+
+        // Nhận diện chỉ tay XUỐNG - ngón trỏ hướng xuống dưới
+        function isPointingDownGesture(landmarks) {
+            const indexTip = landmarks[8];
+            const indexMcp = landmarks[5];
+            const middleTip = landmarks[12];
+            const middleMcp = landmarks[9];
+            const ringTip = landmarks[16];
+            const ringMcp = landmarks[13];
+            const pinkyTip = landmarks[20];
+            const pinkyMcp = landmarks[17];
+
+            // Ngón trỏ chỉ xuống (tip.y > mcp.y nghĩa là đầu ngón thấp hơn)
+            const indexPointingDown = indexTip.y > indexMcp.y + 0.05;
+            // Các ngón khác co lại
+            const middleCurled = middleTip.y > middleMcp.y - 0.03;
+            const ringCurled = ringTip.y > ringMcp.y - 0.03;
+            const pinkyCurled = pinkyTip.y > pinkyMcp.y - 0.03;
+
+            return indexPointingDown && middleCurled && ringCurled && pinkyCurled;
+        }
+
+        function startSystem() {
+            document.getElementById('btnStart').style.display = 'none';
+            bgMusic.play().catch(e => console.log(e));
+            init3D();
+
+            const video = document.getElementsByClassName('input_video')[0];
+            const canvas = document.getElementById('camera-preview');
+            const ctx = canvas.getContext('2d');
+            const drawIndicator = document.getElementById('draw-mode-indicator');
+
+            // Cập nhật kích thước canvas theo CSS
+            function updateCanvasSize() {
+                const rect = canvas.getBoundingClientRect();
+                canvas.width = rect.width;
+                canvas.height = rect.height;
+            }
+            updateCanvasSize();
+            window.addEventListener('resize', updateCanvasSize);
+
+            const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+            hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+
+            hands.onResults(results => {
+                const cw = canvas.width;
+                const ch = canvas.height;
+                ctx.clearRect(0, 0, cw, ch);
+                ctx.drawImage(results.image, 0, 0, cw, ch);
+
+                if (results.multiHandLandmarks.length === 2) {
+                    const h1 = results.multiHandLandmarks[0];
+                    const h2 = results.multiHandLandmarks[1];
+                    const distIndex = Math.hypot(h1[8].x - h2[8].x, h1[8].y - h2[8].y);
+                    const distThumb = Math.hypot(h1[4].x - h2[4].x, h1[4].y - h2[4].y);
+                    if (distIndex < 0.15 && distThumb < 0.15) {
+                        state = 'HEART';
+                        isPointing = false;
+                        drawIndicator.classList.remove('active');
+                        return;
+                    }
+                }
+
+                if (results.multiHandLandmarks.length > 0) {
+                    const lm = results.multiHandLandmarks[0];
+                    handX = lm[9].x;
+                    handY = lm[9].y;
+
+                    // Kiểm tra chỉ tay XUỐNG trước (Snow Globe mode)
+                    if (isPointingDownGesture(lm)) {
+                        state = 'SNOWGLOBE';
+                        isPointing = false;
+                        isPointingDown = true;
+                        drawIndicator.innerHTML = '❄️ SNOW GLOBE ❄️';
+                        drawIndicator.style.color = '#00BFFF';
+                        drawIndicator.classList.add('active');
+                        return;
+                    }
+
+                    // Kiểm tra chỉ tay LÊN (Rainbow mode)
+                    if (isPointingGesture(lm)) {
+                        state = 'DRAW';
+                        isPointing = true;
+                        isPointingDown = false;
+                        drawIndicator.innerHTML = '✨ DRAWING MODE ✨';
+                        drawIndicator.style.color = '#FF69B4';
+                        drawIndicator.classList.add('active');
+
+                        const fingerTip = lm[8];
+                        fingerX3D = (1 - fingerTip.x - 0.5) * 120;
+                        fingerY3D = -(fingerTip.y - 0.5) * 80;
+                        return;
+                    }
+
+                    isPointing = false;
+                    isPointingDown = false;
+                    drawIndicator.classList.remove('active');
+
+                    const handOffset = handX - 0.5;
+                    if (Math.abs(handOffset) < CENTER_THRESHOLD) {
+                        autoRotateSpeed = 0;
+                    } else {
+                        autoRotateSpeed = handOffset * 0.05;
+                    }
+
+                    const tips = [8, 12, 16, 20];
+                    const wrist = lm[0];
+                    let openDist = 0;
+                    tips.forEach(i => openDist += Math.hypot(lm[i].x - wrist.x, lm[i].y - wrist.y));
+                    const avgDist = openDist / 4;
+                    const pinchDist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+
+                    if (avgDist < 0.25) {
+                        state = 'TREE';
+                    } else if (pinchDist < 0.05) {
+                        state = 'PHOTO';
+                    } else {
+                        state = 'EXPLODE';
+                    }
+                } else {
+                    state = 'TREE';
+                    isPointing = false;
+                    drawIndicator.classList.remove('active');
+                    autoRotateSpeed = 0.003;
+                }
+            });
+
+            // Cấu hình camera phù hợp với thiết bị
+            const isMobile = window.innerWidth < 768;
+            const cameraWidth = isMobile ? 320 : 640;
+            const cameraHeight = isMobile ? 240 : 480;
+
+            const cameraUtils = new Camera(video, {
+                onFrame: async () => { await hands.send({ image: video }); },
+                width: cameraWidth,
+                height: cameraHeight,
+                facingMode: 'user' // Camera trước
+            });
+            cameraUtils.start();
+        }
+
+        window.addEventListener('resize', () => {
+            if (camera) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.fov = getFOV();
+                camera.position.z = getCameraZ();
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        });
+    </script>
+</body>
+
+</html>
